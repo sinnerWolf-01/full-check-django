@@ -1,0 +1,76 @@
+{
+  "info": {
+    "name": "Fuel Route Planner",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [{ "key": "base_url", "value": "http://127.0.0.1:8000" }],
+  "item": [
+    {
+      "name": "Health",
+      "request": { "method": "GET", "url": "{{base_url}}/api/health/" }
+    },
+    {
+      "name": "Route - Chicago to Los Angeles (GET)",
+      "request": {
+        "method": "GET",
+        "url": {
+          "raw": "{{base_url}}/api/route/?start=Chicago, IL&finish=Los Angeles, CA",
+          "host": ["{{base_url}}"],
+          "path": ["api", "route", ""],
+          "query": [
+            { "key": "start", "value": "Chicago, IL" },
+            { "key": "finish", "value": "Los Angeles, CA" }
+          ]
+        }
+      }
+    },
+    {
+      "name": "Route - New York to Miami (POST JSON)",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": { "mode": "raw", "raw": "{\n  \"start\": \"New York, NY\",\n  \"finish\": \"Miami, FL\"\n}" },
+        "url": "{{base_url}}/api/route/"
+      }
+    },
+    {
+      "name": "Route - Seattle to Boston (coordinates)",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": { "mode": "raw", "raw": "{\n  \"start\": \"47.6062,-122.3321\",\n  \"finish\": \"42.3601,-71.0589\"\n}" },
+        "url": "{{base_url}}/api/route/"
+      }
+    },
+    {
+      "name": "Route - Short trip, no stops (Dallas to Houston)",
+      "request": {
+        "method": "GET",
+        "url": {
+          "raw": "{{base_url}}/api/route/?start=Dallas, TX&finish=Houston, TX",
+          "host": ["{{base_url}}"],
+          "path": ["api", "route", ""],
+          "query": [
+            { "key": "start", "value": "Dallas, TX" },
+            { "key": "finish", "value": "Houston, TX" }
+          ]
+        }
+      }
+    },
+    {
+      "name": "Error - outside USA",
+      "request": {
+        "method": "GET",
+        "url": {
+          "raw": "{{base_url}}/api/route/?start=51.5074,-0.1278&finish=Boston, MA",
+          "host": ["{{base_url}}"],
+          "path": ["api", "route", ""],
+          "query": [
+            { "key": "start", "value": "51.5074,-0.1278" },
+            { "key": "finish", "value": "Boston, MA" }
+          ]
+        }
+      }
+    }
+  ]
+}

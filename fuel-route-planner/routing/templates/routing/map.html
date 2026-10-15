@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Fuel Route Plan</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <style>
+    :root { --ink:#1d2433; --muted:#5b6474; --line:#e3e6eb; --accent:#0b6e4f; --route:#1f5fbf; --bg:#f6f7f9; }
+    * { box-sizing: border-box; }
+    html, body { margin:0; height:100%; font:14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; color:var(--ink); background:var(--bg); }
+    .layout { display:grid; grid-template-columns: 360px 1fr; height:100%; }
+    aside { overflow-y:auto; padding:20px; background:#fff; border-right:1px solid var(--line); }
+    #map { height:100%; }
+    h1 { font-size:17px; margin:0 0 4px; }
+    .trip { color:var(--muted); margin:0 0 16px; }
+    .stats { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:18px; }
+    .stat { border:1px solid var(--line); border-radius:8px; padding:10px; }
+    .stat b { display:block; font-size:18px; }
+    .stat span { color:var(--muted); font-size:12px; }
+    .stat.cost b { color:var(--accent); }
+    h2 { font-size:13px; text-transform:uppercase; letter-spacing:.04em; color:var(--muted); margin:0 0 8px; }
+    ol { list-style:none; margin:0; padding:0; }
+    li { border-top:1px solid var(--line); padding:10px 0; cursor:pointer; }
+    li:hover .name { text-decoration:underline; }
+    .row { display:flex; justify-content:space-between; gap:8px; }
+    .name { font-weight:600; }
+    .sub { color:var(--muted); font-size:12px; }
+    .badge { display:inline-grid; place-items:center; width:22px; height:22px; border-radius:50%; background:var(--accent); color:#fff; font-size:12px; font-weight:700; margin-right:6px; }
+    .empty { color:var(--muted); }
+    .pin { width:26px; height:26px; border-radius:50%; background:var(--accent); color:#fff; border:2px solid #fff; display:grid; place-items:center; font-weight:700; font-size:12px; box-shadow:0 1px 4px rgba(0,0,0,.35); }
+    .pin.end { background:var(--ink); }
+    @media (max-width: 760px) {
+      .layout { grid-template-columns:1fr; grid-template-rows: 55vh auto; }
+      #map { grid-row:1; } aside { grid-row:2; border-right:0; }
+    }
+  </style>
+</head>
+<body>
+<div class="layout">
+  <aside>
+    <h1>Fuel route plan</h1>
+    <p class="trip">{{ plan.start.label }} → {{ plan.finish.label }}</p>
+    <div class="stats">
+      <div class="stat cost"><b>${{ plan.summary.total_fuel_cost_usd|floatformat:2 }}</b><span>Total fuel cost</span></div>
+      <div class="stat"><b>{{ plan.summary.total_distance_miles|floatformat:0 }} mi</b><span>Distance</span></div>
+      <div class="stat"><b>{{ plan.summary.number_of_fuel_stops }}</b><span>Fuel stops</span></div>
+      <div class="stat"><b>{{ plan.summary.estimated_drive_time_hours|floatformat:1 }} h</b><span>Drive time</span></div>
+    </div>
+    <h2>Fuel stops</h2>
+    {% if plan.fuel_stops %}
+    <ol id="stops">
+      {% for s in plan.fuel_stops %}
+      <li data-index="{{ forloop.counter0 }}">
+        <div class="row"><span class="name"><span class="badge">{{ s.stop_number }}</span>{{ s.name }}</span><b>${{ s.price_per_gallon|floatformat:3 }}</b></div>
+        <div class="sub">{{ s.city }}, {{ s.state }} · mile {{ s.mile_marker|floatformat:0 }}</div>
+        <div class="sub">{{ s.gallons|floatformat:1 }} gal · ${{ s.cost|floatformat:2 }}</div>
+      </li>
+      {% endfor %}
+    </ol>
+    {% else %}
+    <p class="empty">No stops needed — the trip fits in one tank.</p>
+    {% endif %}
+  </aside>
+  <div id="map"></div>
+</div>
+
+{{ plan|json_script:"plan-data" }}
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+  const plan = JSON.parse(document.getElementById("plan-data").textContent);
+  const map = L.map("map");
+  // Free, keyless basemaps. Esri is the default; the switcher (top right)
+  // offers OpenStreetMap, whose servers need a Referer header (see
+  // SECURE_REFERRER_POLICY in settings.py).
+  const tileOpts = { maxZoom: 19, referrerPolicy: "strict-origin-when-cross-origin" };
+  const esriAttr = "Tiles &copy; Esri &mdash; Esri, HERE, Garmin, USGS, &copy; OpenStreetMap contributors, and the GIS User Community";
+  const basemaps = {
+    "Streets (Esri)": L.tileLayer(
+      "https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}",
+      { ...tileOpts, attribution: esriAttr }),
+    "Topographic (Esri)": L.tileLayer(
+      "https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}",
+      { ...tileOpts, attribution: esriAttr }),
+    "OpenStreetMap": L.tileLayer(
+      "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
+      { ...tileOpts, attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors' }),
+  };
+  basemaps["Streets (Esri)"].addTo(map);
+  L.control.layers(basemaps, null, { position: "topright" }).addTo(map);
+
+  const routeLine = L.geoJSON(plan.route, { style: { color: "#1f5fbf", weight: 5, opacity: 0.85 } }).addTo(map);
+  map.fitBounds(routeLine.getBounds(), { padding: [30, 30] });
+
+  const pin = (text, cls) => L.divIcon({ className: "", html: `<div class="pin ${cls || ""}">${text}</div>`, iconSize: [26, 26], iconAnchor: [13, 13] });
+  const esc = (v) => String(v).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+  L.marker([plan.start.latitude, plan.start.longitude], { icon: pin("A", "end") })
+    .addTo(map).bindPopup(`<b>Start</b><br>${esc(plan.start.label)}`);
+  L.marker([plan.finish.latitude, plan.finish.longitude], { icon: pin("B", "end") })
+    .addTo(map).bindPopup(`<b>Finish</b><br>${esc(plan.finish.label)}`);
+
+  const markers = plan.fuel_stops.map((s) =>
+    L.marker([s.latitude, s.longitude], { icon: pin(s.stop_number) }).addTo(map).bindPopup(
+      `<b>${esc(s.name)}</b><br>${esc(s.address)}<br>${esc(s.city)}, ${esc(s.state)}<br>` +
+      `$${s.price_per_gallon.toFixed(3)}/gal · ${s.gallons.toFixed(1)} gal · <b>$${s.cost.toFixed(2)}</b><br>` +
+      `Mile ${Math.round(s.mile_marker)} · arrive with ${Math.round(s.fuel_on_arrival_miles)} mi of range`
+    )
+  );
+
+  document.querySelectorAll("#stops li").forEach((li) => li.addEventListener("click", () => {
+    const m = markers[Number(li.dataset.index)];
+    map.setView(m.getLatLng(), 11);
+    m.openPopup();
+  }));
+</script>
+</body>
+</html>
