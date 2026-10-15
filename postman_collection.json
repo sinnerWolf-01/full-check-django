@@ -1,0 +1,672 @@
+{
+  "info": {
+    "name": "Fuel Route Planner",
+    "description": "Run the whole collection with the Collection Runner; each request has automatic checks.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://127.0.0.1:8000"
+    },
+    {
+      "key": "plan_id",
+      "value": ""
+    },
+    {
+      "key": "first_ms",
+      "value": ""
+    }
+  ],
+  "item": [
+    {
+      "name": "1. Setup check",
+      "item": [
+        {
+          "name": "Health",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Stations are loaded', () => pm.expect(pm.response.json().geocoded_station_locations_indexed).to.be.above(1000));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "description": "Confirms the server is up and fuel stations are loaded.",
+            "url": {
+              "raw": "{{base_url}}/api/health/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "health",
+                ""
+              ],
+              "query": []
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "2. Route planning",
+      "item": [
+        {
+          "name": "Chicago to Los Angeles",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const d = pm.response.json();",
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Has summary, fuel_stops, route and map_url', () => {",
+                  "  pm.expect(d).to.have.keys('plan_id','start','finish','summary','fuel_stops','route','map_url','meta');",
+                  "  pm.expect(d.route.geometry.type).to.eql('LineString');",
+                  "});",
+                  "pm.test('At most 1 call to the routing API', () => pm.expect(d.meta.routing_api_calls).to.be.at.most(1));",
+                  "pm.test('No stretch longer than the 500-mile range', () => {",
+                  "  const marks = [0, ...d.fuel_stops.map(s => s.mile_marker), d.summary.total_distance_miles];",
+                  "  for (let i = 1; i < marks.length; i++) pm.expect(marks[i] - marks[i-1]).to.be.at.most(500.5);",
+                  "});",
+                  "pm.test('Total cost equals the sum of stop costs', () => {",
+                  "  const sum = d.fuel_stops.reduce((a, s) => a + s.cost, 0);",
+                  "  pm.expect(Math.abs(sum - d.summary.total_fuel_cost_usd)).to.be.below(0.05 * Math.max(1, d.fuel_stops.length));",
+                  "});",
+                  "pm.test('Gallons bought = (distance - 500 starting miles) / 10 mpg', () => {",
+                  "  const expected = Math.max(0, d.summary.total_distance_miles - 500) / 10;",
+                  "  pm.expect(Math.abs(d.summary.total_gallons_purchased - expected)).to.be.below(0.5);",
+                  "});",
+                  "console.log(`${d.start.label} -> ${d.finish.label}: ${d.summary.total_distance_miles} mi, ` +",
+                  "  `${d.summary.number_of_fuel_stops} stops, $${d.summary.total_fuel_cost_usd}, ${d.meta.timings_ms.total} ms`);",
+                  "pm.collectionVariables.set('plan_id', d.plan_id);",
+                  "pm.collectionVariables.set('first_ms', d.meta.timings_ms.total);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "description": "Long cross-country trip; needs several fuel stops.",
+            "url": {
+              "raw": "{{base_url}}/api/route/?start=Chicago, IL&finish=Los Angeles, CA",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "route",
+                ""
+              ],
+              "query": [
+                {
+                  "key": "start",
+                  "value": "Chicago, IL"
+                },
+                {
+                  "key": "finish",
+                  "value": "Los Angeles, CA"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Chicago to Los Angeles (again - cached)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const d = pm.response.json();",
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Repeat request makes 0 routing API calls', () => pm.expect(d.meta.routing_api_calls).to.eql(0));",
+                  "console.log(`First: ${pm.collectionVariables.get('first_ms')} ms, cached: ${d.meta.timings_ms.total} ms`);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "description": "Same route again: served from cache, no external call.",
+            "url": {
+              "raw": "{{base_url}}/api/route/?start=Chicago, IL&finish=Los Angeles, CA",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "route",
+                ""
+              ],
+              "query": [
+                {
+                  "key": "start",
+                  "value": "Chicago, IL"
+                },
+                {
+                  "key": "finish",
+                  "value": "Los Angeles, CA"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Map for that plan",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Returns the Leaflet map page', () => pm.expect(pm.response.text()).to.include('leaflet'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "description": "HTML map. Open in a browser to see it; Postman shows the raw HTML.",
+            "url": {
+              "raw": "{{base_url}}/api/route/{{plan_id}}/map/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "route",
+                "{{plan_id}}",
+                "map",
+                ""
+              ],
+              "query": []
+            }
+          }
+        },
+        {
+          "name": "New York to Miami (POST JSON)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const d = pm.response.json();",
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Has summary, fuel_stops, route and map_url', () => {",
+                  "  pm.expect(d).to.have.keys('plan_id','start','finish','summary','fuel_stops','route','map_url','meta');",
+                  "  pm.expect(d.route.geometry.type).to.eql('LineString');",
+                  "});",
+                  "pm.test('At most 1 call to the routing API', () => pm.expect(d.meta.routing_api_calls).to.be.at.most(1));",
+                  "pm.test('No stretch longer than the 500-mile range', () => {",
+                  "  const marks = [0, ...d.fuel_stops.map(s => s.mile_marker), d.summary.total_distance_miles];",
+                  "  for (let i = 1; i < marks.length; i++) pm.expect(marks[i] - marks[i-1]).to.be.at.most(500.5);",
+                  "});",
+                  "pm.test('Total cost equals the sum of stop costs', () => {",
+                  "  const sum = d.fuel_stops.reduce((a, s) => a + s.cost, 0);",
+                  "  pm.expect(Math.abs(sum - d.summary.total_fuel_cost_usd)).to.be.below(0.05 * Math.max(1, d.fuel_stops.length));",
+                  "});",
+                  "pm.test('Gallons bought = (distance - 500 starting miles) / 10 mpg', () => {",
+                  "  const expected = Math.max(0, d.summary.total_distance_miles - 500) / 10;",
+                  "  pm.expect(Math.abs(d.summary.total_gallons_purchased - expected)).to.be.below(0.5);",
+                  "});",
+                  "console.log(`${d.start.label} -> ${d.finish.label}: ${d.summary.total_distance_miles} mi, ` +",
+                  "  `${d.summary.number_of_fuel_stops} stops, $${d.summary.total_fuel_cost_usd}, ${d.meta.timings_ms.total} ms`);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "description": "Same API with a JSON body.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"start\": \"New York, NY\",\n  \"finish\": \"Miami, FL\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/route/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "route",
+                ""
+              ]
+            }
+          }
+        },
+        {
+          "name": "Seattle to Boston (coordinates)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const d = pm.response.json();",
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Has summary, fuel_stops, route and map_url', () => {",
+                  "  pm.expect(d).to.have.keys('plan_id','start','finish','summary','fuel_stops','route','map_url','meta');",
+                  "  pm.expect(d.route.geometry.type).to.eql('LineString');",
+                  "});",
+                  "pm.test('At most 1 call to the routing API', () => pm.expect(d.meta.routing_api_calls).to.be.at.most(1));",
+                  "pm.test('No stretch longer than the 500-mile range', () => {",
+                  "  const marks = [0, ...d.fuel_stops.map(s => s.mile_marker), d.summary.total_distance_miles];",
+                  "  for (let i = 1; i < marks.length; i++) pm.expect(marks[i] - marks[i-1]).to.be.at.most(500.5);",
+                  "});",
+                  "pm.test('Total cost equals the sum of stop costs', () => {",
+                  "  const sum = d.fuel_stops.reduce((a, s) => a + s.cost, 0);",
+                  "  pm.expect(Math.abs(sum - d.summary.total_fuel_cost_usd)).to.be.below(0.05 * Math.max(1, d.fuel_stops.length));",
+                  "});",
+                  "pm.test('Gallons bought = (distance - 500 starting miles) / 10 mpg', () => {",
+                  "  const expected = Math.max(0, d.summary.total_distance_miles - 500) / 10;",
+                  "  pm.expect(Math.abs(d.summary.total_gallons_purchased - expected)).to.be.below(0.5);",
+                  "});",
+                  "console.log(`${d.start.label} -> ${d.finish.label}: ${d.summary.total_distance_miles} mi, ` +",
+                  "  `${d.summary.number_of_fuel_stops} stops, $${d.summary.total_fuel_cost_usd}, ${d.meta.timings_ms.total} ms`);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "description": "Longest test: about 3,000 miles, accepts lat,lng input.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"start\": \"47.6062,-122.3321\",\n  \"finish\": \"42.3601,-71.0589\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/route/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "route",
+                ""
+              ]
+            }
+          }
+        },
+        {
+          "name": "Denver to Dallas (full state names)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const d = pm.response.json();",
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Has summary, fuel_stops, route and map_url', () => {",
+                  "  pm.expect(d).to.have.keys('plan_id','start','finish','summary','fuel_stops','route','map_url','meta');",
+                  "  pm.expect(d.route.geometry.type).to.eql('LineString');",
+                  "});",
+                  "pm.test('At most 1 call to the routing API', () => pm.expect(d.meta.routing_api_calls).to.be.at.most(1));",
+                  "pm.test('No stretch longer than the 500-mile range', () => {",
+                  "  const marks = [0, ...d.fuel_stops.map(s => s.mile_marker), d.summary.total_distance_miles];",
+                  "  for (let i = 1; i < marks.length; i++) pm.expect(marks[i] - marks[i-1]).to.be.at.most(500.5);",
+                  "});",
+                  "pm.test('Total cost equals the sum of stop costs', () => {",
+                  "  const sum = d.fuel_stops.reduce((a, s) => a + s.cost, 0);",
+                  "  pm.expect(Math.abs(sum - d.summary.total_fuel_cost_usd)).to.be.below(0.05 * Math.max(1, d.fuel_stops.length));",
+                  "});",
+                  "pm.test('Gallons bought = (distance - 500 starting miles) / 10 mpg', () => {",
+                  "  const expected = Math.max(0, d.summary.total_distance_miles - 500) / 10;",
+                  "  pm.expect(Math.abs(d.summary.total_gallons_purchased - expected)).to.be.below(0.5);",
+                  "});",
+                  "console.log(`${d.start.label} -> ${d.finish.label}: ${d.summary.total_distance_miles} mi, ` +",
+                  "  `${d.summary.number_of_fuel_stops} stops, $${d.summary.total_fuel_cost_usd}, ${d.meta.timings_ms.total} ms`);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "description": "",
+            "url": {
+              "raw": "{{base_url}}/api/route/?start=Denver, Colorado&finish=Dallas, Texas",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "route",
+                ""
+              ],
+              "query": [
+                {
+                  "key": "start",
+                  "value": "Denver, Colorado"
+                },
+                {
+                  "key": "finish",
+                  "value": "Dallas, Texas"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Dallas to Houston (short trip, no stops)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const d = pm.response.json();",
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Has summary, fuel_stops, route and map_url', () => {",
+                  "  pm.expect(d).to.have.keys('plan_id','start','finish','summary','fuel_stops','route','map_url','meta');",
+                  "  pm.expect(d.route.geometry.type).to.eql('LineString');",
+                  "});",
+                  "pm.test('At most 1 call to the routing API', () => pm.expect(d.meta.routing_api_calls).to.be.at.most(1));",
+                  "pm.test('No stretch longer than the 500-mile range', () => {",
+                  "  const marks = [0, ...d.fuel_stops.map(s => s.mile_marker), d.summary.total_distance_miles];",
+                  "  for (let i = 1; i < marks.length; i++) pm.expect(marks[i] - marks[i-1]).to.be.at.most(500.5);",
+                  "});",
+                  "pm.test('Total cost equals the sum of stop costs', () => {",
+                  "  const sum = d.fuel_stops.reduce((a, s) => a + s.cost, 0);",
+                  "  pm.expect(Math.abs(sum - d.summary.total_fuel_cost_usd)).to.be.below(0.05 * Math.max(1, d.fuel_stops.length));",
+                  "});",
+                  "pm.test('Gallons bought = (distance - 500 starting miles) / 10 mpg', () => {",
+                  "  const expected = Math.max(0, d.summary.total_distance_miles - 500) / 10;",
+                  "  pm.expect(Math.abs(d.summary.total_gallons_purchased - expected)).to.be.below(0.5);",
+                  "});",
+                  "console.log(`${d.start.label} -> ${d.finish.label}: ${d.summary.total_distance_miles} mi, ` +",
+                  "  `${d.summary.number_of_fuel_stops} stops, $${d.summary.total_fuel_cost_usd}, ${d.meta.timings_ms.total} ms`);",
+                  "pm.test('Under 500 miles needs no stops and costs $0', () => {",
+                  "  pm.expect(d.fuel_stops.length).to.eql(0);",
+                  "  pm.expect(d.summary.total_fuel_cost_usd).to.eql(0);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "description": "",
+            "url": {
+              "raw": "{{base_url}}/api/route/?start=Dallas, TX&finish=Houston, TX",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "route",
+                ""
+              ],
+              "query": [
+                {
+                  "key": "start",
+                  "value": "Dallas, TX"
+                },
+                {
+                  "key": "finish",
+                  "value": "Houston, TX"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Chicago to LA with wider detour (25 mi)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const d = pm.response.json();",
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Has summary, fuel_stops, route and map_url', () => {",
+                  "  pm.expect(d).to.have.keys('plan_id','start','finish','summary','fuel_stops','route','map_url','meta');",
+                  "  pm.expect(d.route.geometry.type).to.eql('LineString');",
+                  "});",
+                  "pm.test('At most 1 call to the routing API', () => pm.expect(d.meta.routing_api_calls).to.be.at.most(1));",
+                  "pm.test('No stretch longer than the 500-mile range', () => {",
+                  "  const marks = [0, ...d.fuel_stops.map(s => s.mile_marker), d.summary.total_distance_miles];",
+                  "  for (let i = 1; i < marks.length; i++) pm.expect(marks[i] - marks[i-1]).to.be.at.most(500.5);",
+                  "});",
+                  "pm.test('Total cost equals the sum of stop costs', () => {",
+                  "  const sum = d.fuel_stops.reduce((a, s) => a + s.cost, 0);",
+                  "  pm.expect(Math.abs(sum - d.summary.total_fuel_cost_usd)).to.be.below(0.05 * Math.max(1, d.fuel_stops.length));",
+                  "});",
+                  "pm.test('Gallons bought = (distance - 500 starting miles) / 10 mpg', () => {",
+                  "  const expected = Math.max(0, d.summary.total_distance_miles - 500) / 10;",
+                  "  pm.expect(Math.abs(d.summary.total_gallons_purchased - expected)).to.be.below(0.5);",
+                  "});",
+                  "console.log(`${d.start.label} -> ${d.finish.label}: ${d.summary.total_distance_miles} mi, ` +",
+                  "  `${d.summary.number_of_fuel_stops} stops, $${d.summary.total_fuel_cost_usd}, ${d.meta.timings_ms.total} ms`);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "description": "More stations considered; cost should be the same or lower than the 10-mile default.",
+            "url": {
+              "raw": "{{base_url}}/api/route/?start=Chicago, IL&finish=Los Angeles, CA&max_detour_miles=25",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "route",
+                ""
+              ],
+              "query": [
+                {
+                  "key": "start",
+                  "value": "Chicago, IL"
+                },
+                {
+                  "key": "finish",
+                  "value": "Los Angeles, CA"
+                },
+                {
+                  "key": "max_detour_miles",
+                  "value": "25"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "3. Error handling",
+      "item": [
+        {
+          "name": "Missing finish",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 400', () => pm.response.to.have.status(400));",
+                  "pm.test('Returns an error message', () => pm.expect(pm.response.json().error).to.be.a('string'));",
+                  "console.log('Error message:', pm.response.json().error);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "description": "",
+            "url": {
+              "raw": "{{base_url}}/api/route/?start=Chicago, IL",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "route",
+                ""
+              ],
+              "query": [
+                {
+                  "key": "start",
+                  "value": "Chicago, IL"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Start outside the USA (London)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 400', () => pm.response.to.have.status(400));",
+                  "pm.test('Returns an error message', () => pm.expect(pm.response.json().error).to.be.a('string'));",
+                  "console.log('Error message:', pm.response.json().error);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "description": "",
+            "url": {
+              "raw": "{{base_url}}/api/route/?start=51.5074,-0.1278&finish=Boston, MA",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "route",
+                ""
+              ],
+              "query": [
+                {
+                  "key": "start",
+                  "value": "51.5074,-0.1278"
+                },
+                {
+                  "key": "finish",
+                  "value": "Boston, MA"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Invalid max_detour_miles",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 400', () => pm.response.to.have.status(400));",
+                  "pm.test('Returns an error message', () => pm.expect(pm.response.json().error).to.be.a('string'));",
+                  "console.log('Error message:', pm.response.json().error);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "description": "",
+            "url": {
+              "raw": "{{base_url}}/api/route/?start=Chicago, IL&finish=Denver, CO&max_detour_miles=abc",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "route",
+                ""
+              ],
+              "query": [
+                {
+                  "key": "start",
+                  "value": "Chicago, IL"
+                },
+                {
+                  "key": "finish",
+                  "value": "Denver, CO"
+                },
+                {
+                  "key": "max_detour_miles",
+                  "value": "abc"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Malformed JSON body",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 400', () => pm.response.to.have.status(400));",
+                  "pm.test('Returns an error message', () => pm.expect(pm.response.json().error).to.be.a('string'));",
+                  "console.log('Error message:', pm.response.json().error);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "description": "",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\"start\": \"Chicago, IL\", "
+            },
+            "url": {
+              "raw": "{{base_url}}/api/route/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "route",
+                ""
+              ]
+            }
+          }
+        }
+      ]
+    }
+  ]
+}
